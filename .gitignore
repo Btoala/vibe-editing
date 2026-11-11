@@ -28,3 +28,16 @@ __pycache__/
 **/youtube_token*.json
 **/client_secret*.json
 .vibe-editing/
+
+# Private distribution plans, manifests, state and legacy publishing history
+**/config/distribution.json
+*.distribution-plan.json
+*.publish.json
+*.sqlite3
+*.sqlite3-journal
+*.sqlite3-wal
+*.sqlite3-shm
+**/buffer/posted_log.json
+**/buffer/url_cache.json
+**/buffer/api_calls.json
+**/workspace/bridge_log.jsonl

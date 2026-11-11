@@ -1,13 +1,13 @@
 ---
 name: highlight
-description: THE highlights-channel clipper, run three ways. MINE mode (given a link or file of a raw Q&A / hotline / podcast recording) mines it into RANKED, postable HORIZONTAL 16:9 "mid" videos optimized for SUBSCRIBER growth (subs_per_1k_views, NOT views/CTR), cuts them, optionally appends YOUR own CTA outro, and delivers them locally to upload as YouTube drafts. POST mode (after you have uploaded those mids as drafts and say "post & schedule these") titles them with the subs-optimized title rules and schedules them to YOUR channel via your own YouTube sign-in. FILL mode (Mode C) auto-fills your social queue with finished 9:16 SHORTS from a folder, posted to YOUR channel via the Buffer API + your own storage (MINE/POST make 16:9 mids; /edit makes the 9:16 shorts that FILL distributes). Trigger keywords highlight, /highlight, mine mids, make mids, highlights channel, Q&A mid, hotline mid, raw Q&A to clips, mine this hotline, post and schedule these, schedule these out, go post these, title and schedule the drafts, fill my queue, fill the buffer queue, auto-post shorts, queue shorts to buffer, schedule shorts.
+description: THE highlights-channel clipper, run three ways. MINE mode (given a link or file of a raw Q&A / hotline / podcast recording) mines it into RANKED, postable HORIZONTAL 16:9 "mid" videos optimized for SUBSCRIBER growth (subs_per_1k_views, NOT views/CTR), cuts them, optionally appends YOUR own CTA outro, and delivers them locally to upload as YouTube drafts. POST mode (after you have uploaded those mids as drafts and say "post & schedule these") prepares channel-bound title and schedule reviews using your own YouTube sign-in for optional read-only checks; live publishing is disabled pending account verification. FILL mode (Mode C) prepares manifest-bound distribution reviews for finished 9:16 SHORTS from a folder using the Buffer API + your own storage; live writes are disabled (MINE/POST make 16:9 mids; /edit makes the 9:16 shorts that FILL distributes). Trigger keywords highlight, /highlight, mine mids, make mids, highlights channel, Q&A mid, hotline mid, raw Q&A to clips, mine this hotline, post and schedule these, schedule these out, go post these, title and schedule the drafts, fill my queue, fill the buffer queue, auto-post shorts, queue shorts to buffer, schedule shorts.
 ---
 
 # /highlight — highlights-channel clipper
 
 Turn a long recording (Q&A / hotline / podcast) into ranked, postable **HORIZONTAL 16:9
 "mid" videos** for a highlights / clips channel whose goal is **subscriber growth**. Three
-modes: **MINE** (recording → finished mids), **POST** (uploaded drafts → titled + scheduled), and **FILL** (Mode C — auto-queue finished 9:16 shorts to your channel via Buffer).
+modes: **MINE** (recording → finished mids), **POST** (explicit uploaded drafts → title/schedule review), and **FILL** (Mode C — review finished 9:16 shorts for Buffer distribution). Live publishing is disabled in this revision.
 
 > **Mids are 16:9 horizontal**, ~3–10 min — regular videos, not 9:16 shorts. (For shorts use
 > `/edit`.) This skill self-locates via `${CLAUDE_PLUGIN_ROOT}` (the plugin install dir); every
@@ -27,9 +27,9 @@ modes: **MINE** (recording → finished mids), **POST** (uploaded drafts → tit
 - **MINE** — they give a **link/file** to a raw recording / say "mine these". → produce
   finished mids, deliver locally. **STOP there** — they upload them as drafts themselves.
 - **POST** — they say **"post & schedule these" / "schedule these out"** (the mids are already
-  uploaded as YouTube drafts on their channel). → title + schedule them.
+  uploaded as YouTube drafts on their channel). → prepare an exact title/schedule review for the selected IDs.
 - **FILL (Mode C)** — they say **"fill my queue" / "auto-post my shorts"**. → queue finished
-  9:16 shorts from a folder to their channel via Buffer (see Mode C below).
+  9:16 shorts from a folder into a destination-bound Buffer review (see Mode C below).
 
 The full loop: `MINE → (you upload drafts) → POST → (Studio re-export feeds back to sharpen).`
 
@@ -63,60 +63,55 @@ AssemblyAI when connected. Keep `GROQ_API_KEY` for audit/fallback helpers, not p
 
 ---
 
-## MODE B — POST  ("post & schedule these")
+## MODE B — POST ("post & schedule these")
 
-The mids are **already uploaded as drafts** on the user's channel. Title + schedule them with
-the subs-optimized rules, via the **YouTube Data API v3** using the user's OWN Google sign-in:
+Prepare a review for explicitly selected private YouTube uploads. Read
+[distribution safety](../../../../docs/DISTRIBUTION_SAFETY.md) before preparing any upload,
+queue or schedule. Live media writes are disabled; do not bypass the release gate.
 
-```
+Require the private destination registry, a hash/channel-bound manifest beside each
+local video, and `--selection` naming the exact local file and existing video ID. Never
+select all private uploads automatically. Use an offline provider snapshot for dry-run,
+or request `--verify` for read-only identity and metadata retrieval.
+
+```bash
 python3 ${CLAUDE_PLUGIN_ROOT}/skills/highlight/scripts/highlight_post.py \
-    --channel-id YOUR_CHANNEL_ID [--limit N] [--slots 12:00,18:00] [--tz America/Los_Angeles]
+  --destination YOUR_ALIAS --selection selection.json --snapshot snapshot.json \
+  --no-retitle --dry-run
 ```
-This:
-1. Lists the channel's DRAFT/private uploads (the ones you just uploaded).
-2. Titles each one via `title_sop.py` (the subs-optimized rules — needs `ANTHROPIC_API_KEY`,
-   or falls back to a deterministic local titler from the transcript).
-3. Schedules each to the next open daily slot (default 12:00 & 18:00) as `private` +
-   `publishAt`, via the YouTube Data API.
 
-### What the recipient must connect (one-time)
-- **A Google Cloud project** with the **YouTube Data API v3** enabled, an **OAuth client
-  (Desktop app)** downloaded as `client_secret.json`.
-- Put it at `${CLAUDE_PLUGIN_ROOT}/config/youtube_client_secret.json` (or pass
-  `--client-secret <path>`). First run opens a browser for **their own** Google sign-in and
-  caches a token at `${CLAUDE_PLUGIN_ROOT}/config/youtube_token.json`.
-- `pip install google-api-python-client google-auth-oauthlib`.
-- Their own `YOUR_CHANNEL_ID` (Studio → Settings → Channel → Advanced, or the `UC…` in the
-  channel URL). Nothing is tied to any other account.
+Display the complete title, description, hash, destination IDs, visibility, exact local
+and UTC schedule, and provider request before any publishing operation. Explain that
+YouTube `private + publishAt` becomes **public at the scheduled time**. Preserve unrelated
+metadata. Reuse existing OAuth tokens; do not silently open a login flow, change accounts
+or overwrite grants. The local titler remains available; paid titling requires explicit
+`--use-llm` and cannot run during dry-run. A saved plan and matching approval digest do
+not bypass the currently disabled live gate.
 
-> POST acts only on YOUR channel via YOUR auth. It schedules as **private + publishAt** (a
-> safe, reversible draft-schedule), and `--dry-run` prints the plan without writing anything.
+## MODE C — FILL ("fill my queue" / "auto-post my shorts")
 
----
+Prepare Buffer reviews for finished **9:16 shorts**. Distribution only; editing stays
+unchanged. Require an explicit destination registry and each clip's `.publish.json`
+manifest. Treat mismatched environment/file destination configuration as a blocker.
 
-## MODE C — FILL  ("fill my queue" / "auto-post my shorts")
-
-Auto-fill a social queue with finished **9:16 shorts** (the ones `/edit` makes): scan a folder,
-filter, and queue each to the user's channel on a schedule via the **Buffer API**. Distribution
-only — no cutting. (MINE/POST above handle the 16:9 mids.)
-
+```bash
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/highlight/buffer/fill_queue.py discover
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/highlight/buffer/fill_queue.py fill \
+  --destination YOUR_ALIAS --dir /path/to/shorts --total 1 --dry-run
 ```
-python3 ${CLAUDE_PLUGIN_ROOT}/skills/highlight/buffer/fill_queue.py discover    # find their channel id
-python3 ${CLAUDE_PLUGIN_ROOT}/skills/highlight/buffer/fill_queue.py fill --dry-run
-python3 ${CLAUDE_PLUGIN_ROOT}/skills/highlight/buffer/fill_queue.py fill --total 10
-```
-Scans a folder (`--dir`, env `VIBE_SHORTS_DIR`, else the deliver folder); keeps clips with audio
-at 10–180s; never queues the same clip twice (local ledger); caps at `VIBE_BUFFER_DAILY_CAP`
-(default 10); `--dry-run` previews.
 
-### What the recipient connects (one-time) — Mode C needs THREE of their own things
-1. **Buffer token** — publish.buffer.com/settings/api → `export BUFFER_TOKEN=…`
-2. **Their channel id** — `fill_queue.py discover` → `export BUFFER_CHANNEL_ID=…`
-3. **Storage for public URLs** (Buffer requires a public media URL) — their own Supabase or any
-   S3-style bucket: `export SUPABASE_URL=… SUPABASE_KEY=… SUPABASE_BUCKET=…` (or pass
-   `--video-url` for a pre-hosted clip).
+`discover` reads the connected Buffer account; dry-run is offline and writes nothing.
+Default `fill` also previews. Validate audio, duration (10–180 seconds), 9:16 dimensions,
+full-file SHA-256 and asset lineage. Histories are scoped to canonical YouTube IDs and
+shared across direct/Buffer routes; caps include uncertain attempts. Renames cannot
+bypass exact-byte detection, but hashes alone do not detect re-encodes.
 
-Nothing is tied to any other account. Full setup: `buffer/README.md`.
+Buffer saved drafts default to private delivery. Hosting the source video would still
+make its bytes publicly fetchable, so hosting also requires the approved plan and live
+release gate. Reuse the existing Buffer credentials and Supabase configuration. Do not
+introduce a service or assume a draft proves eventual publication. See
+[buffer/README.md](buffer/README.md) and the shared distribution guide for setup,
+legacy migration, approval and recovery limitations.
 
 ---
 
@@ -125,7 +120,7 @@ Nothing is tied to any other account. Full setup: `buffer/README.md`.
 - Cut **opens on the guest/caller's problem** (with numbers), **ends the instant the payoff
   lands** — nothing trails.
 - 16:9 horizontal. No 9:16 reframe. Keep it brand-safe (no prices-as-promises, no personal PII).
-- **No clear payoff = not postable.** POST scheduling is gated (`--dry-run` previews first).
+- **No clear payoff = not postable.** Publishing requires full-plan review; live mutations remain disabled.
 
 ## Files
 - `references/`: `research_findings.md` (the method's empirical basis) · `cutting_prompts.md`
@@ -138,8 +133,8 @@ Nothing is tied to any other account. Full setup: `buffer/README.md`.
   `highlight_asd.py` + `highlight_multicam.py` + `highlight_reframe16.py` (two-cam Q&A
   switching) · `highlight_studio_import.py` (import YOUR Studio CSV to retune weights) ·
   `highlight_source_match.py` (link a mid back to its long-form source) ·
-  `highlight_publish_bridge.py` (**OPTIONAL** auto-upload — normally you upload manually).
-- `buffer/` — **MODE C (FILL)**: auto-post finished 9:16 shorts to your Buffer queue
+  `highlight_publish_bridge.py` (private-upload review; live upload disabled).
+- `buffer/` — **MODE C (FILL)**: review finished 9:16 shorts for your Buffer queue
   (`fill_queue.py` — bring your own Buffer token + channel + storage). See `buffer/README.md`.
 
 ## Reuse, don't duplicate (ONE-skill rule)
