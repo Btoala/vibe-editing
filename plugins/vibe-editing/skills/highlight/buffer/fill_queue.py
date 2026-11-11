@@ -67,6 +67,7 @@ def main():
     fill.add_argument("--visibility", choices=["private", "unlisted", "public"])
     runtime.add_arguments(fill)
     args = parser.parse_args()
+    runtime.validate_cli_mode(args)
     if args.command == "discover":
         from buffer_api import discover
         discover()

@@ -109,6 +109,7 @@ def main():
     parser.add_argument("--no-retitle", action="store_true")
     runtime.add_arguments(parser)
     args = parser.parse_args()
+    runtime.validate_cli_mode(args)
     plans = []
     if not args.execute_plan:
         if not args.selection:
@@ -138,6 +139,10 @@ def main():
             raise safety.Blocked("Supply an offline --snapshot or explicitly request read-only --verify")
         by_id = {v["id"]: v for v in videos}
         occupied = [v["status"]["publishAt"] for v in videos if v.get("status", {}).get("publishAt")]
+        remote_occupied = {safety.aware(value) for value in occupied}
+        for entry in chosen:
+            if entry.get("publish_at") and safety.aware(entry["publish_at"]) in remote_occupied:
+                raise safety.Blocked("Explicit schedule conflicts with an existing snapshot slot")
         # Reserve explicit times in the generator too, so generated slots cannot
         # collide with another item in this same approved selection.
         occupied += [v["publish_at"] for v in chosen if v.get("publish_at")]

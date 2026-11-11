@@ -30,6 +30,7 @@ def main():
     parser.add_argument("--yes-upload", action="store_true", help="Legacy consent flag; a saved approved plan is also required")
     runtime.add_arguments(parser)
     args = parser.parse_args()
+    runtime.validate_cli_mode(args)
     plans = []
     if not args.execute_plan:
         if not args.video:

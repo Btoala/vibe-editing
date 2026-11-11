@@ -146,6 +146,7 @@ class BufferProvider:
         post = _mutate(plan["provider_request"])
         ledger.record_remote_id(plan["plan_id"], post["id"])
         actual = get_post(self.destination.organization_id, post["id"])
+        safety.require_buffer_media_binding(plan, actual)
         metadata = actual.get("metadata") or {}
         if actual.get("id") != post["id"]:
             raise BufferError("Buffer readback returned a different post")

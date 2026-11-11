@@ -323,7 +323,8 @@ class IntegrationTests(unittest.TestCase):
         ledger.initialize()
         ledger.reserve(p, self.now)
         ledger.finish(p["plan_id"], "confirmed", "same-post")
-        current = {"id": "same-post", "channelId": self.d.buffer_id, "status": "draft"}
+        current = {"id": "same-post", "channelId": self.d.buffer_id, "status": "draft",
+                   "assets": [{"id": "synthetic-asset", "mimeType": "video/mp4", "source": safety.expected_media_url(p)}]}
         promoted = safety.prepare(self.short, self.d, runtime.clip_manifest(self.short), p["title"], p["description"], operation="buffer_promote",
                                   visibility="public", due_at=self.due, remote_id="same-post", remote_snapshot=current)
         self.assertEqual(promoted["provider_request"]["method"], "editPost")
@@ -518,6 +519,7 @@ class IntegrationTests(unittest.TestCase):
         remote = {"id": "synthetic-post", "channelId": self.d.buffer_id, "status": "draft", "dueAt": None,
                   "text": p["description"], "metadata": {"title": p["title"], "privacy": "private", "madeForKids": False,
                   "notifySubscribers": False, "category": {"categoryId": "22"}}}
+        remote["assets"] = [{"id": "synthetic-asset", "mimeType": "video/mp4", "source": safety.expected_media_url(p)}]
         with patch.object(safety, "require_live_publishing"), patch.object(provider, "observation", return_value=observation), \
                 patch.object(storage, "upload_video", return_value=safety.expected_media_url(p)), \
                 patch.object(buffer_api, "_mutate", return_value={"id": remote["id"]}), \
@@ -544,6 +546,7 @@ class IntegrationTests(unittest.TestCase):
         remote = {"id": "synthetic-post", "channelId": self.d.buffer_id, "status": "draft", "dueAt": p["due_at"],
                   "text": p["description"], "metadata": {"title": p["title"], "privacy": "public", "madeForKids": False,
                   "notifySubscribers": False, "category": {"categoryId": "22"}}}
+        remote["assets"] = [{"id": "synthetic-asset", "mimeType": "video/mp4", "source": safety.expected_media_url(p)}]
         with patch.object(safety, "require_live_publishing"), patch.object(provider, "observation", return_value=observation), \
                 patch.object(storage, "upload_video", return_value=safety.expected_media_url(p)), \
                 patch.object(buffer_api, "_mutate", return_value={"id": remote["id"]}), \

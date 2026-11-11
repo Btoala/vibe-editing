@@ -305,11 +305,28 @@ def youtube_schedule_body(plan, current):
     return {"id": plan["remote_id"], "snippet": snippet, "status": preserved_status}
 
 
+def require_buffer_media_binding(plan, post):
+    """Fail closed unless one returned video names the approved hash object.
+
+    If the provider rewrites this source, keep the operation held until a
+    separately verified immutable asset mapping can establish equivalence.
+    """
+    expected = expected_media_url(plan)
+    assets = post.get("assets")
+    if not expected or not isinstance(assets, list) or len(assets) != 1:
+        raise Blocked("Buffer media identity is missing or ambiguous")
+    asset = assets[0]
+    if (not isinstance(asset, dict) or asset.get("source") != expected
+            or not str(asset.get("mimeType", "")).startswith("video/")):
+        raise Blocked("Buffer media differs from the approved content identity")
+
+
 def buffer_edit_request(plan, current):
     if current != plan["remote_snapshot"]:
         raise Blocked("Buffer draft changed after review")
     if current.get("id") != plan["remote_id"] or current.get("channelId") != plan["destination"]["buffer_id"] or current.get("status") != "draft":
         raise Blocked("Not the approved Buffer draft/channel")
+    require_buffer_media_binding(plan, current)
     # Edit only explicitly approved metadata; omitted assets remain unchanged.
     return {"input": {"id": plan["remote_id"], "text": plan["description"], "saveToDraft": False,
                       "mode": "customScheduled", "schedulingType": "automatic", "dueAt": plan["due_at"],
@@ -481,45 +498,59 @@ class Ledger:
             return [dict(r) for r in con.execute("SELECT * FROM operations WHERE destination=? ORDER BY rowid", (destination,))]
 
     def reserve(self, plan, now, global_cap=10):
+        with closing(self.connect()) as con:
+            self._reserve_in(con, plan, now, global_cap)
+
+    def preflight(self, plans, now, global_cap=10):
+        """Check the whole batch without writing the authoritative database.
+
+        A snapshot is advisory; each real reservation still rechecks atomically.
+        """
+        with closing(self.connect(readonly=True)) as source, closing(sqlite3.connect(":memory:")) as preview:
+            preview.row_factory = sqlite3.Row
+            source.backup(preview)
+            for plan in plans:
+                self._reserve_in(preview, plan, now, global_cap)
+
+    def _reserve_in(self, con, plan, now, global_cap=10):
         if type(global_cap) is not int or global_cap < 1:
             raise Blocked("Invalid global cap")
         day = now.astimezone(UTC).date().isoformat()
-        with closing(self.connect()) as con:
-            try:
-                con.execute("BEGIN IMMEDIATE")
-                for source in con.execute("SELECT * FROM legacy_sources"):
-                    p = Path(source["path"])
-                    sha = hashlib.sha256(p.read_bytes()).hexdigest() if p.exists() else "missing"
-                    if sha != source["sha256"]:
-                        raise Blocked("Legacy history changed; stop old publishers and reconcile")
-                if con.execute("SELECT 1 FROM legacy_holds WHERE resolved=0 LIMIT 1").fetchone():
-                    raise Blocked("Unresolved legacy history blocks distribution")
-                if con.execute("SELECT 1 FROM operations WHERE plan_id=?", (plan["plan_id"],)).fetchone():
-                    raise Blocked("Repeated submission; inspect existing operation")
-                legacy_used = con.execute("SELECT COALESCE(SUM(count),0) FROM legacy_usage WHERE day=?", (day,)).fetchone()[0]
-                if con.execute("SELECT COUNT(*) FROM operations WHERE day=?", (day,)).fetchone()[0] + legacy_used >= global_cap:
-                    raise Blocked("Global daily attempt cap reached")
-                if con.execute("SELECT COUNT(*) FROM operations WHERE day=? AND destination=?", (day, plan["destination_key"])).fetchone()[0] >= plan["destination"]["daily_cap"]:
-                    raise Blocked("Channel daily attempt cap reached")
-                if plan["operation"] in ("youtube_schedule", "buffer_promote"):
-                    previous = ("upload_private", "adopt_youtube") if plan["operation"] == "youtube_schedule" else ("buffer_draft", "adopt_buffer")
-                    prior = con.execute("SELECT * FROM operations WHERE destination=? AND sha256=? AND status='confirmed' AND operation IN (?,?) AND remote_id=?",
-                                        (plan["destination_key"], plan["sha256"], *previous, plan["remote_id"])).fetchone()
-                    if not prior:
-                        raise Blocked("Draft identity needs a confirmed upload or explicit legacy adoption")
-                if plan["due_at"]:
-                    con.execute("INSERT INTO slots VALUES (?,?,?)", (plan["destination_key"], plan["due_at"], plan["plan_id"]))
-                con.execute("INSERT INTO operations VALUES (?,?,?,?,?,?,?,?,?,?)", (
-                    plan["plan_id"], plan["destination_key"], plan["sha256"], plan["asset_id"], plan["operation"],
-                    "submitting", day, canonical(plan), plan["remote_id"], None))
-                con.execute("INSERT INTO events VALUES (?,?,?)", (plan["plan_id"], "submitting", "Atomic reservation before provider call"))
-                con.commit()
-            except sqlite3.IntegrityError as exc:
-                con.rollback()
-                raise Blocked("Duplicate content, asset lineage or remote video for this channel") from exc
-            except BaseException:
-                con.rollback()
-                raise
+        try:
+            con.execute("BEGIN IMMEDIATE")
+            for source in con.execute("SELECT * FROM legacy_sources"):
+                p = Path(source["path"])
+                sha = hashlib.sha256(p.read_bytes()).hexdigest() if p.exists() else "missing"
+                if sha != source["sha256"]:
+                    raise Blocked("Legacy history changed; stop old publishers and reconcile")
+            if con.execute("SELECT 1 FROM legacy_holds WHERE resolved=0 LIMIT 1").fetchone():
+                raise Blocked("Unresolved legacy history blocks distribution")
+            if con.execute("SELECT 1 FROM operations WHERE plan_id=?", (plan["plan_id"],)).fetchone():
+                raise Blocked("Repeated submission; inspect existing operation")
+            legacy_used = con.execute("SELECT COALESCE(SUM(count),0) FROM legacy_usage WHERE day=?", (day,)).fetchone()[0]
+            if con.execute("SELECT COUNT(*) FROM operations WHERE day=?", (day,)).fetchone()[0] + legacy_used >= global_cap:
+                raise Blocked("Global daily attempt cap reached")
+            if con.execute("SELECT COUNT(*) FROM operations WHERE day=? AND destination=?", (day, plan["destination_key"])).fetchone()[0] >= plan["destination"]["daily_cap"]:
+                raise Blocked("Channel daily attempt cap reached")
+            if plan["operation"] in ("youtube_schedule", "buffer_promote"):
+                previous = ("upload_private", "adopt_youtube") if plan["operation"] == "youtube_schedule" else ("buffer_draft", "adopt_buffer")
+                prior = con.execute("SELECT * FROM operations WHERE destination=? AND sha256=? AND status='confirmed' AND operation IN (?,?) AND remote_id=?",
+                                    (plan["destination_key"], plan["sha256"], *previous, plan["remote_id"])).fetchone()
+                if not prior:
+                    raise Blocked("Draft identity needs a confirmed upload or explicit legacy adoption")
+            if plan["due_at"]:
+                con.execute("INSERT INTO slots VALUES (?,?,?)", (plan["destination_key"], plan["due_at"], plan["plan_id"]))
+            con.execute("INSERT INTO operations VALUES (?,?,?,?,?,?,?,?,?,?)", (
+                plan["plan_id"], plan["destination_key"], plan["sha256"], plan["asset_id"], plan["operation"],
+                "submitting", day, canonical(plan), plan["remote_id"], None))
+            con.execute("INSERT INTO events VALUES (?,?,?)", (plan["plan_id"], "submitting", "Atomic reservation before provider call"))
+            con.commit()
+        except sqlite3.IntegrityError as exc:
+            con.rollback()
+            raise Blocked("Duplicate content, asset lineage or remote video for this channel") from exc
+        except BaseException:
+            con.rollback()
+            raise
 
     def finish(self, plan_id, status, remote_id=None, evidence=""):
         if status not in ("confirmed", "unknown"):
@@ -591,9 +622,20 @@ class Ledger:
         with closing(self.connect()) as con:
             try:
                 con.execute("BEGIN IMMEDIATE")
-                con.execute("INSERT INTO operations VALUES (?,?,?,?,?,?,?,?,?,?)", (
-                    operation_id, destination.key, sha256, asset_id, "adopt_" + destination.route,
-                    "confirmed", "imported", canonical(record), remote["id"], evidence))
+                allowed = ("upload_private", "adopt_youtube") if destination.route == "youtube" else ("buffer_draft", "buffer_schedule", "adopt_buffer")
+                markers = ",".join("?" for _ in allowed)
+                existing = con.execute(
+                    "SELECT plan_id FROM operations WHERE destination=? AND sha256=? AND asset_id=? "
+                    "AND remote_id=? AND status='confirmed' AND operation IN (" + markers + ")",
+                    (destination.key, sha256, asset_id, remote["id"], *allowed)).fetchone()
+                if existing is not None and legacy_source is not None:
+                    # Resolve another reviewed legacy record against the same
+                    # confirmed identity; never overwrite history or clear broadly.
+                    operation_id = existing["plan_id"]
+                else:
+                    con.execute("INSERT INTO operations VALUES (?,?,?,?,?,?,?,?,?,?)", (
+                        operation_id, destination.key, sha256, asset_id, "adopt_" + destination.route,
+                        "confirmed", "imported", canonical(record), remote["id"], evidence))
                 if legacy_source is not None or legacy_key is not None:
                     changed = con.execute("UPDATE legacy_holds SET resolved=1 WHERE source=? AND record_key=? AND resolved=0",
                                           (str(Path(legacy_source).resolve()), legacy_key)).rowcount

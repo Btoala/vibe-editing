@@ -144,9 +144,27 @@ def history_review(ledger, p):
         return {"blocked": str(exc), "initialization": "Explicit state initialization and legacy review required"}
 
 
-def run_batch(plans, args, provider_factory=provider_for):
-    if args.dry_run and (args.execute_plan or args.save_plan or args.verify):
+def validate_cli_mode(args):
+    # Call immediately after parsing, before credentials, titling or provider reads.
+    if getattr(args, "dry_run", False) and any(
+            getattr(args, key, None) for key in ("execute_plan", "save_plan", "verify")):
         raise safety.Blocked("--dry-run cannot be combined with execution, save-plan or connected verification")
+
+
+def check_cli_destination(args, d):
+    for key, expected in (("destination", d.alias), ("channel_id", d.youtube_id), ("tz", d.timezone)):
+        supplied = getattr(args, key, None)
+        if supplied is not None and supplied != expected:
+            raise safety.Blocked("Command-line destination conflicts with the saved plan")
+    for key, expected in (("token", d.youtube_token_path or ROOT / "config/youtube_token.json"),
+                          ("client_secret", d.youtube_client_secret_path or ROOT / "config/youtube_client_secret.json")):
+        supplied = getattr(args, key, None)
+        if supplied and Path(supplied).expanduser().resolve() != Path(expected).expanduser().resolve():
+            raise safety.Blocked("Command-line credential path conflicts with the saved plan")
+
+
+def run_batch(plans, args, provider_factory=provider_for):
+    validate_cli_mode(args)
     review = load_packet(args.execute_plan) if args.execute_plan else packet(plans)
     plans = review["plans"]
     check_batch(plans)
@@ -157,12 +175,19 @@ def run_batch(plans, args, provider_factory=provider_for):
         d = next((d for d in configured if d.alias == p["destination"]["alias"]), None)
         if d is None or asdict(d) != p["destination"]:
             raise safety.Blocked("Destination configuration changed after review")
+        check_cli_destination(args, d)
         if args.verify:
             observed = provider_factory(d).observation()
             safety.check_observation(d, observed, datetime.now(timezone.utc))
             observations[d.alias] = observed
         print(safety.preview(p, observations.get(d.alias)))
         print(json.dumps({"history": history_review(ledger, p), "channel_daily_attempt_cap": d.daily_cap}, indent=2))
+    try:
+        ledger.preflight(plans, datetime.now(timezone.utc), global_cap())
+        eligibility = {"eligible": True}
+    except safety.Blocked as exc:
+        eligibility = {"eligible": False, "blocked": str(exc)}
+    print(json.dumps({"batch_eligibility": eligibility}, indent=2))
     print(json.dumps({"batch_id": review["batch_id"], "global_daily_attempt_cap": global_cap(),
                       "count": len(plans), "live_publishing": "DISABLED"}, indent=2))
     if args.save_plan:
@@ -173,7 +198,10 @@ def run_batch(plans, args, provider_factory=provider_for):
         return review
     if args.approve_plan_id != review["batch_id"]:
         raise safety.Blocked("Explicit approval of this exact batch ID is required")
-    safety.require_live_publishing()  # No credentials or remote requests before the release gate.
+    safety.require_live_publishing()  # Release gate remains unconditional.
+    if not eligibility["eligible"]:
+        raise safety.Blocked(eligibility["blocked"])
+    prepared = []
     for p in plans:
         d = safety.Destination(**p["destination"])
         provider = provider_factory(d)
@@ -187,6 +215,10 @@ def run_batch(plans, args, provider_factory=provider_for):
                     occupied = provider_factory(peer).occupied_slots()
                     if safety.aware(p["due_at"]) in {safety.aware(t) for t in occupied}:
                         raise safety.Blocked("Approved schedule conflicts with an existing remote slot")
+        prepared.append((p, d, provider, observed))
+    # Validate all remote slots and the entire local batch before the first send.
+    ledger.preflight(plans, datetime.now(timezone.utc), global_cap())
+    for p, d, provider, observed in prepared:
         def submit(approved):
             staged = safety.stage_media(approved, Path(args.state).parent)
             return provider.submit(approved, staged, ledger)
