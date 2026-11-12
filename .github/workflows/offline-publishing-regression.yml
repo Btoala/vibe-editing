@@ -1,0 +1,52 @@
+name: Offline publishing regression tests
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONNOUSERSITE: "1"
+    steps:
+      - name: Check out selected branch
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Compile publishing modules
+        run: |
+          python - <<'PY'
+          import ast
+          from pathlib import Path
+          root = Path("plugins/vibe-editing")
+          files = [
+              root / "distribution_safety.py",
+              root / "distribution_runtime.py",
+              root / "distribution_youtube.py",
+              root / "skills/highlight/buffer/buffer_api.py",
+              root / "skills/highlight/buffer/fill_queue.py",
+              root / "skills/highlight/scripts/highlight_post.py",
+              root / "skills/highlight/scripts/highlight_publish_bridge.py",
+          ]
+          for path in files:
+              ast.parse(path.read_text(), filename=str(path))
+              print("Parsed:", path)
+          PY
+      - name: Count discovered test cases
+        run: |
+          python - <<'PY'
+          import unittest
+          suite = unittest.defaultTestLoader.discover("plugins/vibe-editing/tests")
+          print("Discovered test cases:", suite.countTestCases())
+          PY
+      - name: Run offline regression suite
+        run: python -m unittest discover -s plugins/vibe-editing/tests -v
