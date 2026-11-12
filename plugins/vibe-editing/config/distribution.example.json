@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "destinations": [
+    {
+      "alias": "spawn-point-buffer",
+      "name": "Spawn Point Clips",
+      "youtube_id": "REPLACE_WITH_VERIFIED_YOUTUBE_CHANNEL_ID",
+      "route": "buffer",
+      "buffer_id": "REPLACE_WITH_BUFFER_PROFILE_ID",
+      "organization_id": "REPLACE_WITH_BUFFER_ORGANIZATION_ID",
+      "timezone": "America/New_York",
+      "credential_profile": "existing-private-credentials",
+      "daily_cap": 5,
+      "storage_base_url": "https://REPLACE_WITH_EXISTING_PROJECT.supabase.co",
+      "storage_bucket": "REPLACE_WITH_EXISTING_BUCKET",
+      "storage_prefix": "buffer-videos"
+    },
+    {
+      "alias": "tiny-detour-youtube",
+      "name": "Tiny Detour Films",
+      "youtube_id": "REPLACE_WITH_VERIFIED_YOUTUBE_CHANNEL_ID",
+      "route": "youtube",
+      "timezone": "America/New_York",
+      "credential_profile": "existing-private-credentials",
+      "daily_cap": 5,
+      "youtube_token_path": "~/.config/vibe-editing/tiny-detour-youtube-token.json"
+    }
+  ]
+}

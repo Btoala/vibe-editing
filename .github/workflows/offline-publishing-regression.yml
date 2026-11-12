@@ -14,7 +14,7 @@ jobs:
       PYTHONDONTWRITEBYTECODE: "1"
       PYTHONNOUSERSITE: "1"
     steps:
-      - name: Check out selected branch
+      - name: Check out exact branch commit
         uses: actions/checkout@v4
         with:
           persist-credentials: false
@@ -24,16 +24,16 @@ jobs:
           python-version: "3.11"
       - name: Install lightweight test dependency
         run: python -m pip install httpx
-      - name: Explain baseline coverage
-        run: |
-          echo "Baseline checks only: publishing safeguards are not present on this branch." >> "$GITHUB_STEP_SUMMARY"
-      - name: Compile existing publishing entry points
+      - name: Compile publishing modules
         run: |
           python - <<'PY'
           import ast
           from pathlib import Path
           root = Path("plugins/vibe-editing")
           files = [
+              root / "distribution_safety.py",
+              root / "distribution_runtime.py",
+              root / "distribution_youtube.py",
               root / "skills/highlight/buffer/buffer_api.py",
               root / "skills/highlight/buffer/fill_queue.py",
               root / "skills/highlight/scripts/highlight_post.py",

@@ -19,7 +19,6 @@ HERE = Path(__file__).resolve().parent
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from vibe_credentials import load_keys
-load_keys()
 
 # Local config dirs (used if the matching env var is unset).
 BUFFER_CONFIG = Path.home() / ".config" / "buffer"
@@ -38,6 +37,7 @@ def _read_file(path: Path) -> str | None:
 
 def _from_env_or_file(env_name: str, file_path: Path) -> str | None:
     """Env var first, then a one-line file in ~/.config/."""
+    load_keys()
     return os.environ.get(env_name) or _read_file(file_path)
 
 
@@ -112,6 +112,7 @@ def storage_key() -> str:
 
 def storage_bucket() -> str:
     """Bucket name videos are uploaded into. Env SUPABASE_BUCKET, default 'vibe-media'."""
+    load_keys()
     return (
         os.environ.get("SUPABASE_BUCKET")
         or _read_file(SUPABASE_CONFIG / "bucket")

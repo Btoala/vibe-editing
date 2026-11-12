@@ -45,7 +45,8 @@ def format_slot(dt: datetime) -> str:
 def preview_slots(count: int = 10) -> None:
     """Print a preview of the next N posting slots."""
     slots = generate_slots(count)
-    print(f"Next {count} posting slots (UTC):\n")
+    print("ESTIMATES ONLY: these are not Buffer's actual queue slots and are not reserved.")
+    print(f"Next {count} example slots (UTC):\n")
     for i, s in enumerate(slots, 1):
         local = s.astimezone()
         print(f"  {i:2d}. {format_slot(s)}  ({local.strftime('%I:%M %p %Z')})")
